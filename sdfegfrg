@@ -3986,7 +3986,7 @@ end)
 -- SHARED HUB TAG SIZE SYNC
 -- Admin Settings -> Firebase /settings/tagScale -> all Hub clients
 -- ==============================================================================
-task.spawnfunction()
+task.spawn(function()
     local Players = game:GetService("Players")
     local HttpService = game:GetService("HttpService")
     local FIREBASE_BASE = "https://tys-chat-8cfc2-default-rtdb.firebaseio.com"
