@@ -3565,7 +3565,7 @@ do
 end
 
 -- ==============================================================================
--- UNIVERSAL TYS RECEIVER & TAG SYSTEM (FIXED CLIENT-SIDE)
+-- UNIVERSAL TYS RECEIVER & TAG SYSTEM (SCOPED MODULAR)
 -- ==============================================================================
 task.spawn(function()
     local Players = game:GetService("Players")
@@ -3579,12 +3579,10 @@ task.spawn(function()
     local httpRequest = request or http_request or (syn and syn.request) or (http and http.request) or (fluxus and fluxus.request)
 
     -- --------------------------------------------------------------------------
-    -- GITHUB WHITELIST + HUB USER TAG SYSTEM
-    -- Tags are shown ONLY for players present in Firebase /active_users.
+    -- GITHUB WHITELIST / ROLE SYSTEM
     -- --------------------------------------------------------------------------
     local WHITELIST_URL = "https://raw.githubusercontent.com/didertyt/-/refs/heads/main/whitelist%202"
     local AdminWhitelist = {}
-
     do
         local ok, result = pcall(function()
             local source = game:HttpGet(WHITELIST_URL)
@@ -3593,80 +3591,55 @@ task.spawn(function()
             local loaded = loader()
             return type(loaded) == "table" and loaded or {}
         end)
+        if ok and type(result) == "table" then AdminWhitelist = result end
+    end
+
+    local function getRoleForPlayer(player)
+        return AdminWhitelist[player.Name] == true and "admin" or "user"
+    end
+
+    local LocalPlayerRole = getRoleForPlayer(LocalPlayer)
+
+    -- --------------------------------------------------------------------------
+    -- GITHUB WHITELIST / ROLE SYSTEM
+    -- --------------------------------------------------------------------------
+    -- The GitHub file returns a table like:
+    -- return { ["ABUGEZAN"] = true, ["roblox_user_7617259586"] = true }
+    local WHITELIST_URL = "https://raw.githubusercontent.com/didertyt/-/refs/heads/main/whitelist%202"
+    local AdminWhitelist = {}
+
+    do
+        local ok, result = pcall(function()
+            local source = game:HttpGet(WHITELIST_URL)
+            local loader = loadstring(source)
+            if not loader then
+                error("loadstring is unavailable")
+            end
+            local loaded = loader()
+            return type(loaded) == "table" and loaded or {}
+        end)
+
         if ok and type(result) == "table" then
             AdminWhitelist = result
         end
     end
 
-    local function isAdminPlayer(player)
-        return AdminWhitelist[player.Name] == true
+    local function isWhitelisted(playerName)
+        return AdminWhitelist[playerName] == true
     end
 
     local function getRoleForPlayer(player)
-        return isAdminPlayer(player) and "admin" or "user"
+        return isWhitelisted(player.Name) and "admin" or "user"
     end
 
     local LocalPlayerRole = getRoleForPlayer(LocalPlayer)
-    local HubUsers = {}
-    local hubUsersUrl = string.format("%s/active_users.json?auth=%s", FIREBASE_BASE, FIREBASE_SECRET)
 
-    local function refreshHubUsers()
-        if not httpRequest then return false end
-
-        local res
-        local ok = pcall(function()
-            res = httpRequest({
-                Url = hubUsersUrl,
-                Method = "GET"
-            })
-        end)
-
-        if not ok or not res or not res.Body or res.Body == "null" then
-            return false
-        end
-
-        local decodedOk, data = pcall(function()
-            return HttpService:JSONDecode(res.Body)
-        end)
-
-        if not decodedOk or type(data) ~= "table" then
-            return false
-        end
-
-        local newHubUsers = {}
-        for userId, userData in pairs(data) do
-            local numericId = tonumber(userId)
-            if numericId and type(userData) == "table" then
-                newHubUsers[numericId] = true
-            end
-        end
-
-        HubUsers = newHubUsers
-        return true
-    end
-
-    local function isHubUser(player)
-        return player ~= nil and HubUsers[player.UserId] == true
-    end
-
-    local function removeOverheadTag(character)
-        local head = character and character:FindFirstChild("Head")
-        if head then
-            local oldTag = head:FindFirstChild("TysRoleTag")
-            if oldTag then oldTag:Destroy() end
-        end
-    end
-
+    -- --------------------------------------------------------------------------
+    -- 3D OVERHEAD TAG SYSTEM (TYS NEON AESTHETIC)
+    -- --------------------------------------------------------------------------
     local function applyOverheadTag(character, roleType)
-        if not character then return end
-
         local head = character:WaitForChild("Head", 6)
         if not head then return end
-
-        if not isHubUser(Players:GetPlayerFromCharacter(character)) then
-            removeOverheadTag(character)
-            return
-        end
 
         if head:FindFirstChild("TysRoleTag") then
             head.TysRoleTag:Destroy()
@@ -3721,52 +3694,109 @@ task.spawn(function()
         textLabel.Parent = badge
     end
 
-    local function syncPlayerTag(player)
-        local char = player.Character
-        if not char then return end
-
-        if isHubUser(player) then
-            applyOverheadTag(char, getRoleForPlayer(player))
-        else
-            removeOverheadTag(char)
+    local function setupPlayerTagWatcher(player)
+        local function onCharAdded(char)
+            task.spawn(function()
+                -- Role is determined locally from the GitHub whitelist,
+                -- not from Firebase, so a Firebase value cannot grant Admin.
+                applyOverheadTag(char, getRoleForPlayer(player))
+            end)
         end
+        if player.Character then onCharAdded(player.Character) end
+        player.CharacterAdded:Connect(onCharAdded)
     end
 
-    local function syncAllPlayerTags()
-        for _, player in ipairs(Players:GetPlayers()) do
-            syncPlayerTag(player)
+    for _, plr in ipairs(Players:GetPlayers()) do
+        setupPlayerTagWatcher(plr)
+    end
+    Players.PlayerAdded:Connect(setupPlayerTagWatcher)
+
+-- ==============================================================================
+-- UNIVERSAL TYS RECEIVER & TAG SYSTEM (FIXED CLIENT-SIDE)
+-- ==============================================================================
+task.spawn(function()
+    local Players = game:GetService("Players")
+    local RunService = game:GetService("RunService")
+    local HttpService = game:GetService("HttpService")
+    local SoundService = game:GetService("SoundService")
+    local LocalPlayer = Players.LocalPlayer
+
+    local FIREBASE_BASE = "https://tys-chat-8cfc2-default-rtdb.firebaseio.com"
+    local FIREBASE_SECRET = "N2KgQL9bTL51nQOvNfYgr6fjfNpKwkp4NjMe0jKK"
+    local httpRequest = request or http_request or (syn and syn.request) or (http and http.request) or (fluxus and fluxus.request)
+
+    -- --------------------------------------------------------------------------
+    -- 3D OVERHEAD TAG SYSTEM (TYS NEON AESTHETIC)
+    -- --------------------------------------------------------------------------
+    local function applyOverheadTag(character, roleType)
+        local head = character:WaitForChild("Head", 6)
+        if not head then return end
+
+        if head:FindFirstChild("TysRoleTag") then
+            head.TysRoleTag:Destroy()
         end
+
+        local bbg = Instance.new("BillboardGui")
+        bbg.Name = "TysRoleTag"
+        bbg.Adornee = head
+        bbg.Size = UDim2.new(0, 140, 0, 36)
+        bbg.StudsOffset = Vector3.new(0, 2.4, 0)
+        bbg.AlwaysOnTop = true
+        bbg.Parent = head
+
+        local badge = Instance.new("Frame")
+        badge.Size = UDim2.new(1, 0, 1, 0)
+        badge.BackgroundColor3 = (roleType == "admin") and Color3.fromRGB(26, 10, 42) or Color3.fromRGB(18, 10, 30)
+        badge.BackgroundTransparency = 0.15
+        badge.BorderSizePixel = 0
+        badge.Parent = bbg
+
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0, 8)
+        corner.Parent = badge
+
+        local stroke = Instance.new("UIStroke")
+        stroke.Thickness = (roleType == "admin") and 1.8 or 1.2
+        stroke.Color = (roleType == "admin") and Color3.fromRGB(255, 80, 220) or Color3.fromRGB(160, 60, 240)
+        stroke.Parent = badge
+
+        local glow = Instance.new("UIGradient")
+        if roleType == "admin" then
+            glow.Color = ColorSequence.new({
+                ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 100, 220)),
+                ColorSequenceKeypoint.new(0.5, Color3.fromRGB(170, 50, 255)),
+                ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 80, 150))
+            })
+        else
+            glow.Color = ColorSequence.new({
+                ColorSequenceKeypoint.new(0, Color3.fromRGB(170, 60, 255)),
+                ColorSequenceKeypoint.new(1, Color3.fromRGB(110, 30, 200))
+            })
+        end
+        glow.Parent = stroke
+
+        local textLabel = Instance.new("TextLabel")
+        textLabel.Size = UDim2.new(1, 0, 1, 0)
+        textLabel.BackgroundTransparency = 1
+        textLabel.Font = Enum.Font.GothamBold
+        textLabel.TextSize = (roleType == "admin") and 12 or 10
+        textLabel.TextColor3 = (roleType == "admin") and Color3.fromRGB(255, 220, 255) or Color3.fromRGB(220, 180, 255)
+        textLabel.Text = (roleType == "admin") and "👑 ADMIN" or "🌪️ USER"
+        textLabel.Parent = badge
     end
 
     local function setupPlayerTagWatcher(player)
         local function onCharAdded(char)
             task.spawn(function()
-                task.wait(0.15)
-                syncPlayerTag(player)
+                -- Role is determined locally from the GitHub whitelist,
+                -- not from Firebase, so a Firebase value cannot grant Admin.
+                applyOverheadTag(char, getRoleForPlayer(player))
             end)
         end
-
-        if player.Character then
-            onCharAdded(player.Character)
-        end
-
+        if player.Character then onCharAdded(player.Character) end
         player.CharacterAdded:Connect(onCharAdded)
-        player.AncestryChanged:Connect(function(_, parent)
-            if not parent then
-                HubUsers[player.UserId] = nil
-            end
-        end)
     end
 
-    task.spawn(function()
-        while task.wait(3) do
-            if refreshHubUsers() then
-                syncAllPlayerTags()
-            end
-        end
-    end)
-
-    refreshHubUsers()
     for _, plr in ipairs(Players:GetPlayers()) do
         setupPlayerTagWatcher(plr)
     end
@@ -3965,7 +3995,7 @@ task.spawn(function()
                     userId = LocalPlayer.UserId,
                     placeId = game.PlaceId,
                     jobId = game.JobId,
-                    role = getRoleForPlayer(LocalPlayer),
+                    role = LocalPlayerRole,
                     lastSeen = os.time()
                 })
             })
@@ -4011,4 +4041,55 @@ task.spawn(function()
             pcall(function() httpRequest({ Url = _R.presenceUrl, Method = "DELETE" }) end)
         end
     end)
+end)
+end)
+
+-- ==============================================================================
+-- SHARED HUB TAG SIZE SYNC
+-- Admin Settings -> Firebase /settings/tagScale -> all Hub clients
+-- ==============================================================================
+task.spawn(function()
+    local Players = game:GetService("Players")
+    local HttpService = game:GetService("HttpService")
+    local FIREBASE_BASE = "https://tys-chat-8cfc2-default-rtdb.firebaseio.com"
+    local FIREBASE_SECRET = "N2KgQL9bTL51nQOvNfYgr6fjfNpKwkp4NjMe0jKK"
+    local httpRequest = request or http_request or (syn and syn.request) or (http and http.request) or (fluxus and fluxus.request)
+    if not httpRequest then return end
+
+    local settingsUrl = string.format("%s/settings/tagScale.json?auth=%s", FIREBASE_BASE, FIREBASE_SECRET)
+    local currentScale = 1
+
+    local function applyScale(scale)
+        currentScale = math.clamp(tonumber(scale) or 1, 0.67, 3.00)
+        for _, player in ipairs(Players:GetPlayers()) do
+            local char = player.Character
+            local head = char and char:FindFirstChild("Head")
+            local tag = head and head:FindFirstChild("TysRoleTag")
+            if tag and tag:IsA("BillboardGui") then
+                tag.Size = UDim2.new(0, 70 * currentScale, 0, 18 * currentScale)
+                tag.StudsOffset = Vector3.new(0, 2.0 * currentScale, 0)
+                local badge = tag:FindFirstChildOfClass("Frame")
+                local textLabel = badge and badge:FindFirstChildOfClass("TextLabel")
+                if textLabel then
+                    local isAdmin = string.find(textLabel.Text, "ADMIN", 1, true) ~= nil
+                    textLabel.TextSize = isAdmin and math.max(1, 6 * currentScale) or math.max(1, 5 * currentScale)
+                end
+            end
+        end
+    end
+
+    while task.wait(2) do
+        local ok, res = pcall(function()
+            return httpRequest({ Url = settingsUrl, Method = "GET" })
+        end)
+        if ok and res and res.Body and res.Body ~= "null" then
+            local decodeOk, data = pcall(function() return HttpService:JSONDecode(res.Body) end)
+            if decodeOk then
+                local value = type(data) == "table" and data.value or data
+                if tonumber(value) then
+                    applyScale(value)
+                end
+            end
+        end
+    end
 end)
